@@ -1,0 +1,26 @@
+# venv
+.venv/
+venv/
+env/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# 大型資料夾
+videos_train/
+frames/
+outputs/
+weights_light_base/
+weights_light_lora/
+onnx/
+trt/
+
+# 模型 / 檔案
+*.pth
+*.onnx
+*.engine
+
+# 影片檔
+*.mp4
+*.mkv
