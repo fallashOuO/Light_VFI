@@ -1,0 +1,49 @@
+# 不上傳虛擬環境
+.venv/
+venv/
+
+# 不上傳 Python 快取
+__pycache__/
+*.pyc
+*.pyo
+
+# 忽略大型資料，但保留裡面的 Python 程式
+data/**
+!data/**/
+!data/**/*.py
+
+videos/**
+!videos/**/
+!videos/**/*.py
+
+checkpoints/**
+!checkpoints/**/
+!checkpoints/**/*.py
+
+results/**
+!results/**/
+!results/**/*.py
+
+# 模型與影片檔
+*.pth
+*.pt
+*.ckpt
+*.onnx
+*.engine
+*.mp4
+*.mov
+*.avi
+*.mkv
+
+# 圖片資料
+*.jpg
+*.jpeg
+*.png
+*.bmp
+*.[Pp][Nn][Gg]
+
+# 編輯器檔案
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
