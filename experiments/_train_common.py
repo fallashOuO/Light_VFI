@@ -14,6 +14,7 @@ from src.utils import (
     save_json,
     append_csv_row,
     file_size_mb,
+    set_seed,
 )
 from src.data.dataset import VFIDataset, split_indices
 from src.data.vimeo_dataset import VimeoTriplet
