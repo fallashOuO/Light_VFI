@@ -16,7 +16,7 @@ from src.utils import (
     file_size_mb,
     set_seed,
 )
-from src.data.dataset import VFIDataset, split_indices
+from src.data.dataset import VFIDataset, split_indices_by_video
 from src.data.vimeo_dataset import VimeoTriplet
 
 
@@ -61,7 +61,11 @@ def make_loaders(cfg: TrainConfig):
         )
         return ds, tr_loader, None
 
-    tr_idx, va_idx = split_indices(len(ds), val_ratio=cfg.val_ratio, seed=cfg.seed)
+    tr_idx, va_idx = split_indices_by_video(
+        ds,
+        val_ratio=cfg.val_ratio,
+        seed=cfg.seed,
+    )
     tr = Subset(ds, tr_idx)
     va = Subset(ds, va_idx)
 

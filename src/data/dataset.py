@@ -84,10 +84,60 @@ class VFIDataset(Dataset):
         return torch.from_numpy(inp), torch.from_numpy(tgt)
 
 
-def split_indices(n: int, val_ratio: float = 0.05, seed: int = 42):
+def split_indices_by_video(
+    dataset: VFIDataset,
+    val_ratio: float = 0.05,
+    seed: int = 42,
+):
+    video_dirs = sorted({
+        video_dir
+        for video_dir, _, _ in dataset.index
+    })
+
+    if len(video_dirs) < 2:
+        raise RuntimeError(
+            "Need at least 2 valid video folders to create "
+            "separate train and validation sets."
+        )
+
     rng = np.random.RandomState(seed)
-    perm = rng.permutation(n)
-    val_n = max(1, int(n * val_ratio))
-    val_idx = perm[:val_n].tolist()
-    train_idx = perm[val_n:].tolist()
+    shuffled_videos = video_dirs.copy()
+    rng.shuffle(shuffled_videos)
+
+    val_video_count = max(
+        1,
+        int(round(len(shuffled_videos) * val_ratio))
+    )
+
+    # 至少保留一部影片作為 training data
+    val_video_count = min(
+        val_video_count,
+        len(shuffled_videos) - 1
+    )
+
+    val_videos = set(shuffled_videos[:val_video_count])
+    train_videos = set(shuffled_videos[val_video_count:])
+
+    train_idx = []
+    val_idx = []
+
+    for sample_idx, (video_dir, _, _) in enumerate(dataset.index):
+        if video_dir in train_videos:
+            train_idx.append(sample_idx)
+        elif video_dir in val_videos:
+            val_idx.append(sample_idx)
+
+    if not train_idx:
+        raise RuntimeError("Training set is empty.")
+
+    if not val_idx:
+        raise RuntimeError("Validation set is empty.")
+
+    print(
+        f"[Split] train_videos={len(train_videos)}, "
+        f"val_videos={len(val_videos)}, "
+        f"train_samples={len(train_idx)}, "
+        f"val_samples={len(val_idx)}"
+    )
+
     return train_idx, val_idx
