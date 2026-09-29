@@ -4,13 +4,13 @@ import csv
 
 import torch
 import numpy as np
-from torch.utils.data import DataLoader, Subset
+from torch.utils.data import DataLoader
 from tqdm import tqdm
 from skimage.metrics import peak_signal_noise_ratio as psnr
 from skimage.metrics import structural_similarity as ssim
 
 from src.models.light_vfi import LightVFI
-from src.data.dataset import VFIDataset, split_indices
+from src.data.dataset import VFIDataset
 from src.data.vimeo_dataset import VimeoTriplet
 from src.peft.lora import inject_lora, load_lora_state_dict
 from src.utils import file_size_mb
@@ -77,10 +77,6 @@ def main():
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
 
     ds = make_dataset(args.data_root, args.dataset_type, args.split, args.resize)
-
-    if args.dataset_type == "custom":
-        _, val_idx = split_indices(len(ds), val_ratio=0.05, seed=42)
-        ds = Subset(ds, val_idx)
 
     loader = DataLoader(
         ds,
