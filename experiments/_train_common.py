@@ -110,6 +110,8 @@ def train_loop(
     save_state_fn,
     method_name: str = "unknown",
 ):
+    set_seed(cfg.seed)
+
     if cfg.device == "cuda":
         assert torch.cuda.is_available(), "CUDA not available!"
 
