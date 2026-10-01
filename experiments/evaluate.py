@@ -91,10 +91,45 @@ def main():
 
     actual_ckpt = args.base_ckpt
 
-    if args.method in ("fullft", "bitfit"):
+    
+    if args.method == "fullft":
         if not args.ckpt:
-            raise ValueError("--ckpt required for fullft/bitfit")
-        model.load_state_dict(torch.load(Path(args.ckpt), map_location="cpu"), strict=True)
+            raise ValueError("--ckpt required for fullft")
+
+        fullft_state = torch.load(
+            Path(args.ckpt),
+            map_location="cpu",
+        )
+        model.load_state_dict(fullft_state, strict=True)
+        actual_ckpt = args.ckpt
+
+    elif args.method == "bitfit":
+        if not args.ckpt:
+            raise ValueError("--ckpt required for bitfit")
+
+        bitfit_state = torch.load(
+            Path(args.ckpt),
+            map_location="cpu",
+        )
+
+        incompatible = model.load_state_dict(
+            bitfit_state,
+            strict=False,
+        )
+
+        if incompatible.unexpected_keys:
+            raise RuntimeError(
+                "Unexpected keys in BitFit checkpoint: "
+                f"{incompatible.unexpected_keys}"
+            )
+
+        if not bitfit_state:
+            raise RuntimeError("BitFit checkpoint is empty.")
+
+        print(
+            f"Loaded {len(bitfit_state)} BitFit parameters "
+            f"from: {args.ckpt}"
+        )
         actual_ckpt = args.ckpt
 
     elif args.method == "lora":
