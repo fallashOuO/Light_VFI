@@ -49,13 +49,15 @@ class VFIDataset(Dataset):
         self.index: List[Tuple[Path, List[Path], int]] = []
         for vdir in self.videos:
             frames = sorted([f for f in vdir.iterdir() if f.suffix.lower() in IMG_EXTS])
-            if len(frames) < 4:
+            if len(frames) < 5:
                 continue
             for i in range(2, len(frames) - 2):
                 self.index.append((vdir, frames, i))
 
         if not self.index:
-            raise RuntimeError("No valid samples (need >=4 frames per video folder).")
+            raise RuntimeError(
+                "No valid samples (need >=5 frames per video folder)."
+            )
 
     def __len__(self):
         return len(self.index)
