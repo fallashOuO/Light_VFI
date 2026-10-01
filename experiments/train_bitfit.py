@@ -15,6 +15,12 @@ def enable_bias_only(model: nn.Module):
         if isinstance(m, nn.Conv2d) and m.bias is not None:
             m.bias.requires_grad = True
 
+def get_bitfit_state_dict(model: nn.Module):
+    return {
+        name: param.detach().cpu()
+        for name, param in model.named_parameters()
+        if param.requires_grad
+    }
 
 def main():
     ap = argparse.ArgumentParser()
@@ -62,7 +68,7 @@ def main():
         cfg,
         model,
         opt,
-        save_state_fn=lambda m: m.state_dict(),
+        save_state_fn=get_bitfit_state_dict,
         method_name="bitfit",
     )
 
