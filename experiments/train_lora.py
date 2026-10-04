@@ -6,6 +6,7 @@ import torch
 
 from src.models.light_vfi import LightVFI
 from src.peft.lora import inject_lora, lora_parameters, get_lora_state_dict
+from src.utils import set_seed
 from experiments._train_common import TrainConfig, train_loop
 
 
@@ -28,6 +29,8 @@ def main():
     ap.add_argument("--alpha", type=int, default=16)
     ap.add_argument("--dropout", type=float, default=0.0)
     args = ap.parse_args()
+
+    set_seed(args.seed)
 
     cfg = TrainConfig(
         data_root=args.data_root,

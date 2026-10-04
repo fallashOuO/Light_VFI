@@ -5,6 +5,7 @@ import torch
 import torch.nn as nn
 
 from src.models.light_vfi import LightVFI
+from src.utils import set_seed
 from experiments._train_common import TrainConfig, train_loop
 
 
@@ -37,6 +38,8 @@ def main():
     ap.add_argument("--num_workers", type=int, default=4)
     ap.add_argument("--seed", type=int, default=42)
     args = ap.parse_args()
+
+    set_seed(args.seed)
 
     cfg = TrainConfig(
         data_root=args.data_root,
