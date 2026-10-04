@@ -48,13 +48,28 @@ class LightVFI(nn.Module):
 
         b = self.bottleneck(self.pool3(e3))
 
-        d3 = F.interpolate(b, scale_factor=2)
+        d3 = F.interpolate(
+            b,
+            size=e3.shape[-2:],
+            mode="bilinear",
+            align_corners=False,
+        )
         d3 = self.dec3(torch.cat([d3, e3], dim=1))
 
-        d2 = F.interpolate(d3, scale_factor=2)
+        d2 = F.interpolate(
+            d3,
+            size=e2.shape[-2:],
+            mode="bilinear",
+            align_corners=False,
+        )
         d2 = self.dec2(torch.cat([d2, e2], dim=1))
 
-        d1 = F.interpolate(d2, scale_factor=2)
+        d1 = F.interpolate(
+            d2,
+            size=e1.shape[-2:],
+            mode="bilinear",
+            align_corners=False,
+        )
         d1 = self.dec1(torch.cat([d1, e1], dim=1))
 
         return torch.sigmoid(self.out(d1))
