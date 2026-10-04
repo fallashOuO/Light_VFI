@@ -30,7 +30,7 @@ def main():
     ap.add_argument("--dataset_type", default="custom", choices=["custom", "vimeo"])
     ap.add_argument("--split", default="train", choices=["train", "test"])
     ap.add_argument("--epochs", type=int, default=5)
-    ap.add_argument("--batch_size", type=int, default=16)
+    ap.add_argument("--batch_size", type=int, default=8)
     ap.add_argument("--lr", type=float, default=5e-4)
     ap.add_argument("--resize", type=int, default=256)
     ap.add_argument("--device", default="cuda")
