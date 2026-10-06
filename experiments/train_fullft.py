@@ -13,7 +13,7 @@ def main():
     ap.add_argument("--data_root", required=True)
     ap.add_argument("--base_ckpt", default="")
     ap.add_argument("--save_dir", default="checkpoints/fullft/domainX")
-    ap.add_argument("--dataset_type", default="custom", choices=["custom", "vimeo"])
+    ap.add_argument("--dataset_type", default="custom", choices=["custom"])
     ap.add_argument("--split", default="train", choices=["train", "test"])
     ap.add_argument("--epochs", type=int, default=5)
     ap.add_argument("--batch_size", type=int, default=8)

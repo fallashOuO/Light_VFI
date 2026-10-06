@@ -40,26 +40,21 @@ class TrainConfig:
 
 
 def make_dataset(cfg: TrainConfig):
-    if cfg.dataset_type == "vimeo":
-        return VimeoTriplet(cfg.data_root, split=cfg.split, resize=cfg.resize)
-    elif cfg.dataset_type == "custom":
-        return VFIDataset(cfg.data_root, resize=cfg.resize, in_frames=cfg.in_frames)
-    else:
-        raise ValueError(f"Unknown dataset_type: {cfg.dataset_type}")
+    if cfg.dataset_type != "custom":
+        raise ValueError(
+            "This four-frame model only supports "
+            "the custom continuous-frame dataset."
+        )
+
+    return VFIDataset(
+        cfg.data_root,
+        resize=cfg.resize,
+        in_frames=cfg.in_frames,
+    )
 
 
 def make_loaders(cfg: TrainConfig):
     ds = make_dataset(cfg)
-
-    if cfg.dataset_type == "vimeo":
-        tr_loader = DataLoader(
-            ds,
-            batch_size=cfg.batch_size,
-            shuffle=(cfg.split == "train"),
-            num_workers=cfg.num_workers,
-            pin_memory=True,
-        )
-        return ds, tr_loader, None
 
     tr_idx, va_idx = split_indices_by_video(
         ds,

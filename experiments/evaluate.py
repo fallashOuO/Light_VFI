@@ -11,18 +11,27 @@ from skimage.metrics import structural_similarity as ssim
 
 from src.models.light_vfi import LightVFI
 from src.data.dataset import VFIDataset
-from src.data.vimeo_dataset import VimeoTriplet
 from src.peft.lora import inject_lora, load_lora_state_dict
 from src.utils import file_size_mb
 
 
-def make_dataset(data_root, dataset_type="custom", split="test", resize=256):
-    if dataset_type == "vimeo":
-        return VimeoTriplet(data_root, split=split, resize=resize)
-    elif dataset_type == "custom":
-        return VFIDataset(data_root, resize=resize, in_frames=4)
-    else:
-        raise ValueError(f"Unknown dataset_type: {dataset_type}")
+def make_dataset(
+    data_root,
+    dataset_type="custom",
+    split="test",
+    resize=256,
+):
+    if dataset_type != "custom":
+        raise ValueError(
+            "This four-frame model only supports "
+            "the custom continuous-frame dataset."
+        )
+
+    return VFIDataset(
+        data_root,
+        resize=resize,
+        in_frames=4,
+    )
 
 
 @torch.no_grad()
@@ -60,7 +69,7 @@ def eval_model(model, loader, device):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--data_root", required=True)
-    ap.add_argument("--dataset_type", default="custom", choices=["custom", "vimeo"])
+    ap.add_argument("--dataset_type", default="custom", choices=["custom"])
     ap.add_argument("--split", default="test", choices=["train", "test"])
     ap.add_argument("--base_ckpt", required=True)
     ap.add_argument("--method", choices=["base", "fullft", "bitfit", "lora"], required=True)
