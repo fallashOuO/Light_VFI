@@ -17,7 +17,7 @@ from src.utils import (
     set_seed,
 )
 from src.data.dataset import VFIDataset, split_indices_by_video
-from src.data.vimeo_dataset import VimeoTriplet
+
 
 
 @dataclass
@@ -25,8 +25,8 @@ class TrainConfig:
     data_root: str
     base_ckpt: str = ""
     save_dir: str = "checkpoints/tmp"
-    dataset_type: str = "custom"   # custom / vimeo
-    split: str = "train"           # vimeo 用
+    dataset_type: str = "custom"   
+    split: str = "train"           
     epochs: int = 5
     batch_size: int = 8
     lr: float = 1e-4
