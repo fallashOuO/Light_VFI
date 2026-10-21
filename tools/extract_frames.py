@@ -1,74 +1,58 @@
-import argparse
-import cv2
 from pathlib import Path
 
+import cv2
+from tqdm import tqdm
 
-def extract_frames(
-    video_path: str,
-    output_dir: str,
-    step: int = 1,
-    ext: str = "png",
-):
-    """
-    step = 1  → 保留全部幀 (例如 60fps)
-    step = 2  → 每兩幀取一幀 (60fps → 30fps)
-    """
+# 前面保留原本的影片資訊與設定
+saved_count = 0
+frame_index = 0
 
-    video_path = Path(video_path)
-    output_dir = Path(output_dir)
+# 如果 step=1，total_output_frames 就約等於影片總幀數
+total_output_frames = (
+    (total_frames + step - 1) // step
+    if total_frames > 0
+    else None
+)
 
-    if not video_path.exists():
-        raise FileNotFoundError(f"Video not found: {video_path}")
+progress = tqdm(
+    total=total_output_frames,
+    desc=f"Extracting {video_path.name}",
+    unit="frame",
+    dynamic_ncols=True,
+)
 
-    output_dir.mkdir(parents=True, exist_ok=True)
+while True:
+    ok, frame = cap.read()
+    if not ok:
+        break
 
-    cap = cv2.VideoCapture(str(video_path))
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    fps = cap.get(cv2.CAP_PROP_FPS)
+    if frame_index % step == 0:
+        output_path = output_dir / (
+            f"{saved_count:08d}.{output_format}"
+        )
 
-    print(f"[INFO] Video: {video_path.name}")
-    print(f"[INFO] FPS: {fps}")
-    print(f"[INFO] Total frames: {total_frames}")
-    print(f"[INFO] Step: {step}")
-    print(f"[INFO] Output dir: {output_dir}")
+        if output_format.lower() in {"jpg", "jpeg"}:
+            success = cv2.imwrite(
+                str(output_path),
+                frame,
+                [cv2.IMWRITE_JPEG_QUALITY, 95],
+            )
+        else:
+            success = cv2.imwrite(str(output_path), frame)
 
-    idx = 0
-    saved_idx = 0
+        if not success:
+            progress.close()
+            cap.release()
+            raise RuntimeError(
+                f"Failed to save frame: {output_path}"
+            )
 
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
+        saved_count += 1
+        progress.update(1)
 
-        if idx % step == 0:
-            out_path = output_dir / f"frame_{saved_idx:06d}.{ext}"
+    frame_index += 1
 
-            if ext == "jpg":
-                cv2.imwrite(str(out_path), frame, [cv2.IMWRITE_JPEG_QUALITY, 95])
-            else:
-                cv2.imwrite(str(out_path), frame)
+progress.close()
+cap.release()
 
-            saved_idx += 1
-
-        idx += 1
-
-    cap.release()
-
-    print(f"[DONE] Saved {saved_idx} frames.")
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--video", required=True, help="Path to video file")
-    parser.add_argument("--output", required=True, help="Output frame directory")
-    parser.add_argument("--step", type=int, default=1, help="Frame step (1=all, 2=half)")
-    parser.add_argument("--ext", default="png", choices=["png", "jpg"])
-
-    args = parser.parse_args()
-
-    extract_frames(
-        video_path=args.video,
-        output_dir=args.output,
-        step=args.step,
-        ext=args.ext,
-    )
+print(f"[DONE] Saved {saved_count} frames to: {output_dir}")

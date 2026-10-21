@@ -1,49 +1,144 @@
-# 不上傳虛擬環境
+# =========================
+# Python virtual environments
+# =========================
 .venv/
 venv/
+env/
+ENV/
 
-# 不上傳 Python 快取
+# =========================
+# Python cache and tooling
+# =========================
 __pycache__/
-*.pyc
-*.pyo
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
 
-# 忽略大型資料，但保留裡面的 Python 程式
+# =========================
+# Jupyter
+# =========================
+.ipynb_checkpoints/
+
+# =========================
+# Environment and secrets
+# =========================
+.env
+.env.*
+!.env.example
+
+# =========================
+# Training datasets
+# Keep Python scripts inside these directories
+# =========================
 data/**
 !data/**/
 !data/**/*.py
+
+datasets/**
+!datasets/**/
+!datasets/**/*.py
 
 videos/**
 !videos/**/
 !videos/**/*.py
 
+# =========================
+# Model checkpoints and exports
+# =========================
 checkpoints/**
 !checkpoints/**/
 !checkpoints/**/*.py
 
+weights/**
+!weights/**/
+!weights/**/*.py
+
+*.pth
+*.pt
+*.ckpt
+*.safetensors
+*.onnx
+*.engine
+*.plan
+
+# =========================
+# Training and evaluation outputs
+# =========================
 results/**
 !results/**/
 !results/**/*.py
 
-# 模型與影片檔
-*.pth
-*.pt
-*.ckpt
-*.onnx
-*.engine
+runs/
+logs/
+wandb/
+lightning_logs/
+tensorboard/
+*.log
+
+# =========================
+# Dataset and array files
+# =========================
+*.npy
+*.npz
+*.h5
+*.hdf5
+*.pkl
+*.pickle
+
+# =========================
+# Video and audio files
+# =========================
 *.mp4
 *.mov
 *.avi
 *.mkv
+*.webm
+*.flv
+*.wav
 
-# 圖片資料
+# =========================
+# Images
+# =========================
 *.jpg
 *.jpeg
 *.png
 *.bmp
-*.[Pp][Nn][Gg]
+*.tif
+*.tiff
+*.gif
+*.webp
 
-# 編輯器檔案
+# =========================
+# Build and package files
+# =========================
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# =========================
+# IDE and editor files
+# =========================
 .vscode/
 .idea/
+*.swp
+*.swo
+
+# =========================
+# Operating-system files
+# =========================
 Thumbs.db
+Desktop.ini
 .DS_Store
+
+# =========================
+# Temporary files
+# =========================
+*.tmp
+*.temp
+*.bak

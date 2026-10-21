@@ -1,8 +1,9 @@
 # src/data/dataset.py
+
 from __future__ import annotations
-import os
+
+import re
 from pathlib import Path
-from typing import List, Tuple
 
 import cv2
 import numpy as np
@@ -10,136 +11,383 @@ import torch
 from torch.utils.data import Dataset
 
 
-IMG_EXTS = {".png", ".jpg", ".jpeg", ".bmp", ".webp"}
+IMG_EXTS = {
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".bmp",
+    ".webp",
+}
+
+
+def natural_sort_key(path: Path) -> list[object]:
+    """
+    使用自然順序排列檔名。
+
+    例如：
+    frame_1.png
+    frame_2.png
+    frame_10.png
+
+    而不是：
+    frame_1.png
+    frame_10.png
+    frame_2.png
+    """
+    parts = re.split(
+        r"(\d+)",
+        path.name.lower(),
+    )
+
+    return [
+        int(part) if part.isdigit() else part
+        for part in parts
+    ]
 
 
 class VFIDataset(Dataset):
     """
+    資料夾格式：
+
     root/
-    video1/
-        frame_000001.png ...
-    video2/
-        ...
+        video1/
+            frame_000001.png
+            frame_000002.png
+            ...
+        video2/
+            frame_000001.png
+            frame_000002.png
+            ...
 
-    For each sample, four neighboring frames around a target frame are selected:
-    input frames = [i-2, i-1, i+1, i+2]
-    target frame = i
+    對於中心幀 i：
 
-    This design avoids exposing the ground truth frame to the model and
-    leverages temporal context to predict the intermediate frame.
+    輸入：
+        [i-2, i-1, i+1, i+2]
 
-    input:  [12, H, W]
-    target: [3, H, W]
+    目標：
+        i
+
+    中心幀不會出現在輸入中，因此不會直接洩漏
+    ground-truth frame。
+
+    輸入形狀：
+        [12, H, W]
+
+    目標形狀：
+        [3, H, W]
     """
 
-    def __init__(self, root: str, resize: int = 256, in_frames: int = 4):
-        assert in_frames == 4, "this research baseline uses 4 frames"
+    def __init__(
+        self,
+        root: str | Path,
+        resize: int = 256,
+        in_frames: int = 4,
+    ) -> None:
+        if in_frames != 4:
+            raise ValueError(
+                "VFIDataset currently requires exactly "
+                f"4 input frames, got {in_frames}."
+            )
+
+        if resize <= 0:
+            raise ValueError(
+                f"resize must be greater than 0, got {resize}"
+            )
+
         self.root = Path(root)
         self.resize = resize
         self.in_frames = in_frames
 
         if not self.root.is_dir():
-            raise FileNotFoundError(f"Dataset root not found: {self.root}")
+            raise NotADirectoryError(
+                f"Dataset root not found: {self.root}"
+            )
 
-        self.videos: List[Path] = [p for p in sorted(self.root.iterdir()) if p.is_dir()]
-        if not self.videos:
-            raise RuntimeError(f"No video dirs found under: {self.root}")
+        candidate_video_dirs = sorted(
+            (
+                path
+                for path in self.root.iterdir()
+                if path.is_dir()
+            ),
+            key=natural_sort_key,
+        )
 
-        # build index: (video_dir, frame_files, center_i)
-        self.index: List[Tuple[Path, List[Path], int]] = []
-        for vdir in self.videos:
-            frames = sorted([f for f in vdir.iterdir() if f.suffix.lower() in IMG_EXTS])
-            if len(frames) < 5:
+        if not candidate_video_dirs:
+            raise RuntimeError(
+                f"No video directories found under: {self.root}"
+            )
+
+        # 每個元素為：
+        # (video_dir, ordered_frame_paths, center_index)
+        self.index: list[
+            tuple[
+                Path,
+                tuple[Path, ...],
+                int,
+            ]
+        ] = []
+
+        self.videos: list[Path] = []
+
+        skipped_video_count = 0
+
+        for video_dir in candidate_video_dirs:
+            frame_paths = sorted(
+                (
+                    path
+                    for path in video_dir.iterdir()
+                    if (
+                        path.is_file()
+                        and path.suffix.lower() in IMG_EXTS
+                    )
+                ),
+                key=natural_sort_key,
+            )
+
+            # 至少需要：
+            # i-2、i-1、i、i+1、i+2
+            if len(frame_paths) < 5:
+                skipped_video_count += 1
                 continue
-            for i in range(2, len(frames) - 2):
-                self.index.append((vdir, frames, i))
+
+            frame_paths_tuple = tuple(frame_paths)
+            self.videos.append(video_dir)
+
+            for center_index in range(
+                2,
+                len(frame_paths_tuple) - 2,
+            ):
+                self.index.append(
+                    (
+                        video_dir,
+                        frame_paths_tuple,
+                        center_index,
+                    )
+                )
 
         if not self.index:
             raise RuntimeError(
-                "No valid samples (need >=5 frames per video folder)."
+                "No valid VFI samples were found. "
+                "Each video directory must contain at least "
+                "5 readable image files."
             )
 
-    def __len__(self):
+        print(
+            f"[Dataset] valid_videos={len(self.videos)}, "
+            f"skipped_videos={skipped_video_count}, "
+            f"samples={len(self.index)}"
+        )
+
+    def __len__(self) -> int:
         return len(self.index)
 
-    def _read_rgb_chw(self, fpath: Path) -> np.ndarray:
-        bgr = cv2.imread(str(fpath), cv2.IMREAD_COLOR)
-        if bgr is None:
-            raise RuntimeError(f"Failed to read image: {fpath}")
-        rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
-        rgb = cv2.resize(rgb, (self.resize, self.resize), interpolation=cv2.INTER_AREA)
-        rgb = rgb.astype(np.float32) / 255.0  # [H,W,3]
-        chw = np.transpose(rgb, (2, 0, 1))    # [3,H,W]
-        return chw
+    def _read_rgb_chw(
+        self,
+        image_path: Path,
+    ) -> np.ndarray:
+        bgr_image = cv2.imread(
+            str(image_path),
+            cv2.IMREAD_COLOR,
+        )
 
-    def __getitem__(self, idx: int):
-        _, frames, i = self.index[idx]
+        if bgr_image is None:
+            raise RuntimeError(
+                f"Failed to read image: {image_path}"
+            )
 
-        # 使用前兩幀 + 後兩幀（不包含 i）
-        idxs = [i - 2, i - 1, i + 1, i + 2]
+        rgb_image = cv2.cvtColor(
+            bgr_image,
+            cv2.COLOR_BGR2RGB,
+        )
 
-        imgs = [self._read_rgb_chw(frames[j]) for j in idxs]
-        inp = np.concatenate(imgs, axis=0)  # [12,H,W]
+        original_height, original_width = (
+            rgb_image.shape[:2]
+        )
 
-        tgt = self._read_rgb_chw(frames[i])
+        # 縮小使用 INTER_AREA；
+        # 放大使用 INTER_CUBIC。
+        if (
+            original_height > self.resize
+            or original_width > self.resize
+        ):
+            interpolation = cv2.INTER_AREA
+        else:
+            interpolation = cv2.INTER_CUBIC
 
-        return torch.from_numpy(inp), torch.from_numpy(tgt)
+        rgb_image = cv2.resize(
+            rgb_image,
+            (self.resize, self.resize),
+            interpolation=interpolation,
+        )
+
+        rgb_image = (
+            rgb_image.astype(np.float32) / 255.0
+        )
+
+        chw_image = np.transpose(
+            rgb_image,
+            (2, 0, 1),
+        )
+
+        return np.ascontiguousarray(
+            chw_image,
+            dtype=np.float32,
+        )
+
+    def __getitem__(
+        self,
+        index: int,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        if index < 0:
+            index += len(self.index)
+
+        if index < 0 or index >= len(self.index):
+            raise IndexError(
+                f"Dataset index out of range: {index}"
+            )
+
+        _, frame_paths, center_index = self.index[index]
+
+        input_indices = [
+            center_index - 2,
+            center_index - 1,
+            center_index + 1,
+            center_index + 2,
+        ]
+
+        input_images = [
+            self._read_rgb_chw(
+                frame_paths[frame_index]
+            )
+            for frame_index in input_indices
+        ]
+
+        input_array = np.concatenate(
+            input_images,
+            axis=0,
+        )
+
+        target_array = self._read_rgb_chw(
+            frame_paths[center_index]
+        )
+
+        input_tensor = torch.from_numpy(
+            input_array
+        )
+
+        target_tensor = torch.from_numpy(
+            target_array
+        )
+
+        return input_tensor, target_tensor
 
 
 def split_indices_by_video(
     dataset: VFIDataset,
     val_ratio: float = 0.05,
     seed: int = 42,
-):
-    video_dirs = sorted({
-        video_dir
-        for video_dir, _, _ in dataset.index
-    })
+) -> tuple[list[int], list[int]]:
+    """
+    以影片資料夾為單位切分訓練集與驗證集。
+
+    同一部影片產生的 samples 不會同時出現在
+    training 與 validation，避免相鄰影格造成資料洩漏。
+    """
+    if not 0.0 <= val_ratio < 1.0:
+        raise ValueError(
+            "val_ratio must satisfy 0 <= val_ratio < 1, "
+            f"got {val_ratio}"
+        )
+
+    video_dirs = sorted(
+        {
+            video_dir
+            for video_dir, _, _ in dataset.index
+        },
+        key=natural_sort_key,
+    )
+
+    if not video_dirs:
+        raise RuntimeError(
+            "The dataset contains no valid video folders."
+        )
+
+    # 不需要驗證集時，全部樣本都作為訓練資料。
+    if val_ratio == 0.0:
+        train_indices = list(
+            range(len(dataset))
+        )
+
+        print(
+            f"[Split] train_videos={len(video_dirs)}, "
+            "val_videos=0, "
+            f"train_samples={len(train_indices)}, "
+            "val_samples=0"
+        )
+
+        return train_indices, []
 
     if len(video_dirs) < 2:
         raise RuntimeError(
-            "Need at least 2 valid video folders to create "
-            "separate train and validation sets."
+            "At least 2 valid video folders are required "
+            "when val_ratio is greater than 0."
         )
 
-    rng = np.random.RandomState(seed)
+    random_generator = np.random.RandomState(seed)
+
     shuffled_videos = video_dirs.copy()
-    rng.shuffle(shuffled_videos)
+    random_generator.shuffle(shuffled_videos)
 
     val_video_count = max(
         1,
-        int(round(len(shuffled_videos) * val_ratio))
+        int(round(
+            len(shuffled_videos) * val_ratio
+        )),
     )
 
-    # 至少保留一部影片作為 training data
+    # 至少保留一部影片作為訓練資料。
     val_video_count = min(
         val_video_count,
-        len(shuffled_videos) - 1
+        len(shuffled_videos) - 1,
     )
 
-    val_videos = set(shuffled_videos[:val_video_count])
-    train_videos = set(shuffled_videos[val_video_count:])
+    val_videos = set(
+        shuffled_videos[:val_video_count]
+    )
 
-    train_idx = []
-    val_idx = []
+    train_videos = set(
+        shuffled_videos[val_video_count:]
+    )
 
-    for sample_idx, (video_dir, _, _) in enumerate(dataset.index):
+    train_indices: list[int] = []
+    val_indices: list[int] = []
+
+    for sample_index, (
+        video_dir,
+        _,
+        _,
+    ) in enumerate(dataset.index):
         if video_dir in train_videos:
-            train_idx.append(sample_idx)
+            train_indices.append(sample_index)
+
         elif video_dir in val_videos:
-            val_idx.append(sample_idx)
+            val_indices.append(sample_index)
 
-    if not train_idx:
-        raise RuntimeError("Training set is empty.")
+    if not train_indices:
+        raise RuntimeError(
+            "The training set is empty."
+        )
 
-    if not val_idx:
-        raise RuntimeError("Validation set is empty.")
+    if not val_indices:
+        raise RuntimeError(
+            "The validation set is empty."
+        )
 
     print(
         f"[Split] train_videos={len(train_videos)}, "
         f"val_videos={len(val_videos)}, "
-        f"train_samples={len(train_idx)}, "
-        f"val_samples={len(val_idx)}"
+        f"train_samples={len(train_indices)}, "
+        f"val_samples={len(val_indices)}"
     )
 
-    return train_idx, val_idx
+    return train_indices, val_indices

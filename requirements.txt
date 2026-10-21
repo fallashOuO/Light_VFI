@@ -1,8 +1,5 @@
 torch
-torchvision
 opencv-python
 numpy
 tqdm
 scikit-image
-matplotlib
-pandas
