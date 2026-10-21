@@ -312,6 +312,77 @@ def split_indices_by_video(
             "The dataset contains no valid video folders."
         )
 
+    # 若資料夾明確使用 *_train 與 *_val 命名，
+    # 優先依名稱固定切分，避免亂數把兩者交換。
+    explicit_train_videos = {
+        video_dir
+        for video_dir in video_dirs
+        if video_dir.name.lower().endswith("_train")
+    }
+    explicit_val_videos = {
+        video_dir
+        for video_dir in video_dirs
+        if video_dir.name.lower().endswith("_val")
+    }
+
+    if explicit_train_videos or explicit_val_videos:
+        if not explicit_train_videos:
+            raise RuntimeError(
+                "Found *_val folders but no *_train folders."
+            )
+
+        if not explicit_val_videos:
+            raise RuntimeError(
+                "Found *_train folders but no *_val folders."
+            )
+
+        unassigned_videos = (
+            set(video_dirs)
+            - explicit_train_videos
+            - explicit_val_videos
+        )
+
+        if unassigned_videos:
+            names = ", ".join(
+                sorted(
+                    video_dir.name
+                    for video_dir in unassigned_videos
+                )
+            )
+            raise RuntimeError(
+                "When explicit *_train and *_val folders are used, "
+                "every valid video folder must use one of those "
+                f"suffixes. Unassigned folders: {names}"
+            )
+
+        train_indices: list[int] = []
+        val_indices: list[int] = []
+
+        for sample_index, (
+            video_dir,
+            _,
+            _,
+        ) in enumerate(dataset.index):
+            if video_dir in explicit_train_videos:
+                train_indices.append(sample_index)
+            elif video_dir in explicit_val_videos:
+                val_indices.append(sample_index)
+
+        if not train_indices or not val_indices:
+            raise RuntimeError(
+                "Explicit training or validation split is empty."
+            )
+
+        print(
+            f"[Split] mode=explicit, "
+            f"train_videos={len(explicit_train_videos)}, "
+            f"val_videos={len(explicit_val_videos)}, "
+            f"train_samples={len(train_indices)}, "
+            f"val_samples={len(val_indices)}"
+        )
+
+        return train_indices, val_indices
+
     # 不需要驗證集時，全部樣本都作為訓練資料。
     if val_ratio == 0.0:
         train_indices = list(

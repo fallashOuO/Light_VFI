@@ -222,7 +222,15 @@ def run_val(
     total_loss = 0.0
     total_samples = 0
 
-    for x, y in loader:
+    progress_bar = tqdm(
+        loader,
+        desc="Validation",
+        ncols=120,
+        leave=True,
+        unit="batch",
+    )
+
+    for x, y in progress_bar:
         x = x.to(
             device,
             non_blocking=device.type == "cuda",
@@ -245,6 +253,14 @@ def run_val(
 
         total_loss += loss.item() * batch_size
         total_samples += batch_size
+
+        average_loss = total_loss / total_samples
+        progress_bar.set_postfix(
+            {
+                "avg_loss": f"{average_loss:.4f}",
+                "samples": f"{total_samples:,}",
+            }
+        )
 
     if total_samples == 0:
         return None
@@ -327,7 +343,7 @@ def train_loop(
         with Timer() as timer:
             progress_bar = tqdm(
                 train_loader,
-                desc=f"Epoch {epoch}/{cfg.epochs}",
+                desc=f"Train {epoch}/{cfg.epochs}",
                 ncols=120,
                 leave=True,
             )
@@ -361,14 +377,29 @@ def train_loop(
                 total_train_loss += loss.item() * batch_size
                 total_train_samples += batch_size
 
-                progress_bar.set_postfix(
-                    {
-                        "loss": f"{loss.item():.4f}",
-                        "lr": (
-                            f"{optimizer.param_groups[0]['lr']:.1e}"
-                        ),
-                    }
+                average_loss = (
+                    total_train_loss / total_train_samples
                 )
+
+                progress_status = {
+                    "loss": f"{loss.item():.4f}",
+                    "avg_loss": f"{average_loss:.4f}",
+                    "samples": f"{total_train_samples:,}",
+                    "lr": (
+                        f"{optimizer.param_groups[0]['lr']:.1e}"
+                    ),
+                }
+
+                if device.type == "cuda":
+                    allocated_gb = (
+                        torch.cuda.memory_allocated(device)
+                        / (1024 ** 3)
+                    )
+                    progress_status["vram"] = (
+                        f"{allocated_gb:.2f}GB"
+                    )
+
+                progress_bar.set_postfix(progress_status)
 
         if total_train_samples == 0:
             raise RuntimeError(
@@ -419,6 +450,8 @@ def train_loop(
             save_state_fn(model),
             epoch_path,
         )
+
+        print(f"[Checkpoint] Saved: {epoch_path}")
 
         if metric < best_metric:
             best_metric = metric
