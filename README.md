@@ -187,7 +187,7 @@ python .\tools\extract_frames.py `
 
 ## 訓練基礎模型
 
-不提供 `--base_ckpt` 時，`train_fullft.py` 會從頭訓練基礎模型：
+基礎模型使用 `train_base.py` 從頭訓練，不需要提供 `--base_ckpt`：
 
 ```powershell
 python -m experiments.train_fullft `
