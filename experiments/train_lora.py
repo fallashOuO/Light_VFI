@@ -26,7 +26,7 @@ def main():
     ap.add_argument(
         "--dataset_type",
         default="custom",
-        choices=["custom"],
+        choices=["custom", "video"],
     )
     ap.add_argument(
         "--split",

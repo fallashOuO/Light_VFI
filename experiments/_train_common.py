@@ -10,6 +10,7 @@ from torch.utils.data import DataLoader, Subset
 from tqdm import tqdm
 
 from src.data.dataset import VFIDataset, split_indices_by_video
+from src.data.video_dataset import VideoVFIDataset
 from src.losses import CharbonnierLoss
 from src.utils import (
     Timer,
@@ -39,6 +40,9 @@ class TrainConfig:
     device: str = "cuda"
     in_frames: int = 4
     base_ch: int = 32
+    video_sample_stride: int = 1
+    video_segment_samples: int = 4096
+    video_shuffle_buffer: int = 256
 
 
 def validate_config(cfg: TrainConfig) -> None:
@@ -49,9 +53,9 @@ def validate_config(cfg: TrainConfig) -> None:
             f"Training data directory not found: {data_root}"
         )
 
-    if cfg.dataset_type != "custom":
+    if cfg.dataset_type not in {"custom", "video"}:
         raise ValueError(
-            "Only dataset_type='custom' is supported."
+            "dataset_type must be either 'custom' or 'video'."
         )
 
     if cfg.split != "train":
@@ -105,6 +109,13 @@ def validate_config(cfg: TrainConfig) -> None:
             f"got {cfg.base_ch}"
         )
 
+    if cfg.video_sample_stride <= 0:
+        raise ValueError("video_sample_stride must be greater than 0.")
+    if cfg.video_segment_samples <= 0:
+        raise ValueError("video_segment_samples must be greater than 0.")
+    if cfg.video_shuffle_buffer < 0:
+        raise ValueError("video_shuffle_buffer must be non-negative.")
+
 
 def resolve_device(device_name: str) -> torch.device:
     device = torch.device(device_name)
@@ -118,36 +129,63 @@ def resolve_device(device_name: str) -> torch.device:
     return device
 
 
-def make_dataset(cfg: TrainConfig) -> VFIDataset:
-    if cfg.dataset_type != "custom":
-        raise ValueError(
-            "This four-frame model only supports "
-            "the custom continuous-frame dataset."
+def make_loaders(
+    cfg: TrainConfig,
+    device: torch.device,
+) -> tuple[object, DataLoader, Optional[DataLoader]]:
+    pin_memory = device.type == "cuda"
+
+    if cfg.dataset_type == "video":
+        root = Path(cfg.data_root)
+        train_root = root / "train"
+        val_root = root / "val"
+
+        train_dataset = VideoVFIDataset(
+            train_root,
+            resize=cfg.resize,
+            in_frames=cfg.in_frames,
+            sample_stride=cfg.video_sample_stride,
+            segment_samples=cfg.video_segment_samples,
+            shuffle_buffer=cfg.video_shuffle_buffer,
+            seed=cfg.seed,
         )
+        val_dataset = VideoVFIDataset(
+            val_root,
+            resize=cfg.resize,
+            in_frames=cfg.in_frames,
+            sample_stride=cfg.video_sample_stride,
+            segment_samples=cfg.video_segment_samples,
+            shuffle_buffer=0,
+            seed=cfg.seed,
+        )
+
+        train_loader = DataLoader(
+            train_dataset,
+            batch_size=cfg.batch_size,
+            shuffle=False,
+            num_workers=cfg.num_workers,
+            pin_memory=pin_memory,
+            persistent_workers=cfg.num_workers > 0,
+        )
+        val_loader = DataLoader(
+            val_dataset,
+            batch_size=cfg.batch_size,
+            shuffle=False,
+            num_workers=cfg.num_workers,
+            pin_memory=pin_memory,
+            persistent_workers=cfg.num_workers > 0,
+        )
+
+        print(f"[Data] total_samples={len(train_dataset) + len(val_dataset):,}")
+        print(f"[Data] train_samples={len(train_dataset):,}")
+        print(f"[Data] val_samples={len(val_dataset):,}")
+        return train_dataset, train_loader, val_loader
 
     dataset = VFIDataset(
         cfg.data_root,
         resize=cfg.resize,
         in_frames=cfg.in_frames,
     )
-
-    if len(dataset) == 0:
-        raise RuntimeError(
-            f"No training samples were found in: {cfg.data_root}"
-        )
-
-    return dataset
-
-
-def make_loaders(
-    cfg: TrainConfig,
-    device: torch.device,
-) -> tuple[
-    VFIDataset,
-    DataLoader,
-    Optional[DataLoader],
-]:
-    dataset = make_dataset(cfg)
 
     train_indices, val_indices = split_indices_by_video(
         dataset,
@@ -170,8 +208,6 @@ def make_loaders(
         dataset,
         val_indices,
     )
-
-    pin_memory = device.type == "cuda"
 
     train_loader = DataLoader(
         train_dataset,

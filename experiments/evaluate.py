@@ -1,9 +1,11 @@
 import argparse
 import csv
 import math
+import time
 from pathlib import Path
 from typing import Any
 
+import lpips
 import numpy as np
 import torch
 from skimage.metrics import peak_signal_noise_ratio
@@ -12,6 +14,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from src.data.dataset import VFIDataset
+from src.data.video_dataset import VideoVFIDataset
 from src.models.light_vfi import LightVFI
 from src.peft.lora import inject_lora, load_lora_state_dict
 from src.utils import file_size_mb
@@ -125,17 +128,26 @@ def resolve_device(device_name: str) -> torch.device:
 def make_dataset(
     data_root: Path,
     resize: int,
-) -> VFIDataset:
+    dataset_type: str,
+) -> VFIDataset | VideoVFIDataset:
     if not data_root.is_dir():
         raise NotADirectoryError(
             f"Evaluation data directory not found: {data_root}"
         )
 
-    dataset = VFIDataset(
-        str(data_root),
-        resize=resize,
-        in_frames=4,
-    )
+    if dataset_type == "video":
+        dataset = VideoVFIDataset(
+            data_root,
+            resize=resize,
+            in_frames=4,
+            shuffle_buffer=0,
+        )
+    else:
+        dataset = VFIDataset(
+            str(data_root),
+            resize=resize,
+            in_frames=4,
+        )
 
     if len(dataset) == 0:
         raise RuntimeError(
@@ -229,11 +241,14 @@ def evaluate_model(
     model: torch.nn.Module,
     loader: DataLoader,
     device: torch.device,
-) -> tuple[float, float]:
+    lpips_model: torch.nn.Module,
+) -> tuple[float, float, float]:
     model.eval()
 
     psnr_values: list[float] = []
     ssim_values: list[float] = []
+    lpips_total = 0.0
+    lpips_samples = 0
 
     progress_bar = tqdm(
         loader,
@@ -257,6 +272,13 @@ def evaluate_model(
             raise FloatingPointError(
                 "The model produced NaN or Inf values."
             )
+
+        lpips_batch = lpips_model(
+            prediction * 2.0 - 1.0,
+            y * 2.0 - 1.0,
+        ).reshape(-1)
+        lpips_total += float(lpips_batch.sum().item())
+        lpips_samples += int(lpips_batch.numel())
 
         prediction_np = (
             prediction
@@ -297,6 +319,7 @@ def evaluate_model(
                 {
                     "PSNR": f"{np.mean(psnr_values):.3f}",
                     "SSIM": f"{np.mean(ssim_values):.4f}",
+                    "LPIPS": f"{lpips_total / max(1, lpips_samples):.4f}",
                 }
             )
 
@@ -307,13 +330,48 @@ def evaluate_model(
 
     mean_psnr = float(np.mean(psnr_values))
     mean_ssim = float(np.mean(ssim_values))
+    mean_lpips = lpips_total / max(1, lpips_samples)
 
     if math.isnan(mean_psnr) or math.isnan(mean_ssim):
         raise FloatingPointError(
             "Evaluation produced a NaN metric."
         )
 
-    return mean_psnr, mean_ssim
+    return mean_psnr, mean_ssim, mean_lpips
+
+
+@torch.no_grad()
+def benchmark_inference(
+    model: torch.nn.Module,
+    loader: DataLoader,
+    device: torch.device,
+    warmup_iterations: int,
+    benchmark_iterations: int,
+) -> tuple[float, float]:
+    """只量測模型 forward，不包含影片解碼、縮放和磁碟 I/O。"""
+    try:
+        x, _ = next(iter(loader))
+    except StopIteration as error:
+        raise RuntimeError("Cannot benchmark an empty dataset.") from error
+
+    x = x.to(device, non_blocking=device.type == "cuda")
+    model.eval()
+
+    for _ in range(warmup_iterations):
+        model(x)
+    if device.type == "cuda":
+        torch.cuda.synchronize(device)
+
+    start = time.perf_counter()
+    for _ in range(benchmark_iterations):
+        model(x)
+    if device.type == "cuda":
+        torch.cuda.synchronize(device)
+    elapsed = time.perf_counter() - start
+
+    processed_samples = benchmark_iterations * x.size(0)
+    seconds_per_sample = elapsed / processed_samples
+    return seconds_per_sample * 1000.0, 1.0 / seconds_per_sample
 
 
 def calculate_checkpoint_sizes(
@@ -381,6 +439,11 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--dataset_type",
+        choices=["custom", "video"],
+        default="custom",
+    )
+    parser.add_argument(
         "--base_ckpt",
         type=Path,
         required=True,
@@ -426,8 +489,10 @@ def main() -> None:
     parser.add_argument(
         "--out_csv",
         type=Path,
-        default=Path("results/metrics/metrics.csv"),
+        default=Path("results/metrics/metrics_v2.csv"),
     )
+    parser.add_argument("--warmup_iterations", type=positive_int, default=10)
+    parser.add_argument("--benchmark_iterations", type=positive_int, default=50)
     parser.add_argument(
         "--r",
         type=positive_int,
@@ -476,6 +541,7 @@ def main() -> None:
     dataset = make_dataset(
         data_root=args.data_root,
         resize=args.resize,
+        dataset_type=args.dataset_type,
     )
 
     loader = DataLoader(
@@ -491,6 +557,10 @@ def main() -> None:
         args.base_ckpt
     )
 
+    method_trainable_params = sum(
+        parameter.numel() for parameter in model.parameters()
+    )
+
     if args.method == "fullft":
         fullft_state_dict = load_checkpoint_file(
             args.ckpt
@@ -500,15 +570,22 @@ def main() -> None:
             fullft_state_dict,
             strict=True,
         )
+        method_trainable_params = sum(
+            tensor.numel() for tensor in fullft_state_dict.values()
+        )
 
         print(
             f"Loaded FullFT checkpoint: {args.ckpt}"
         )
 
     elif args.method == "bitfit":
+        bitfit_state_dict = load_checkpoint_file(args.ckpt)
         load_bitfit_checkpoint(
             model=model,
             checkpoint_path=args.ckpt,
+        )
+        method_trainable_params = sum(
+            tensor.numel() for tensor in bitfit_state_dict.values()
         )
 
     elif args.method == "lora":
@@ -522,6 +599,9 @@ def main() -> None:
         lora_state_dict = load_checkpoint_file(
             args.ckpt
         )
+        method_trainable_params = sum(
+            tensor.numel() for tensor in lora_state_dict.values()
+        )
 
         load_lora_state_dict(
             model,
@@ -534,11 +614,24 @@ def main() -> None:
 
     model.to(device)
 
-    mean_psnr, mean_ssim = evaluate_model(
+    lpips_model = lpips.LPIPS(net="alex").to(device).eval()
+
+    mean_psnr, mean_ssim, mean_lpips = evaluate_model(
         model=model,
         loader=loader,
         device=device,
+        lpips_model=lpips_model,
     )
+
+    inference_ms, inference_fps = benchmark_inference(
+        model=model,
+        loader=loader,
+        device=device,
+        warmup_iterations=args.warmup_iterations,
+        benchmark_iterations=args.benchmark_iterations,
+    )
+
+    total_params = sum(parameter.numel() for parameter in model.parameters())
 
     (
         base_size_mb,
@@ -553,7 +646,16 @@ def main() -> None:
     print(
         f"[Eval] method={args.method} "
         f"PSNR={mean_psnr:.4f} "
-        f"SSIM={mean_ssim:.4f}"
+        f"SSIM={mean_ssim:.4f} "
+        f"LPIPS={mean_lpips:.4f}"
+    )
+    print(
+        f"[Speed] inference_ms={inference_ms:.4f} "
+        f"FPS={inference_fps:.2f} (model forward only)"
+    )
+    print(
+        f"[Params] trainable_for_method={method_trainable_params:,} "
+        f"loaded_model_total={total_params:,}"
     )
 
     print(
@@ -594,12 +696,17 @@ def main() -> None:
                     "total_required_size_mb",
                     "psnr",
                     "ssim",
+                    "lpips",
+                    "inference_ms_per_frame",
+                    "inference_fps",
+                    "method_trainable_params",
+                    "loaded_model_total_params",
                 ]
             )
 
         writer.writerow(
             [
-                "custom",
+                args.dataset_type,
                 str(args.data_root),
                 "test",
                 args.method,
@@ -614,6 +721,11 @@ def main() -> None:
                 f"{total_required_size_mb:.3f}",
                 f"{mean_psnr:.6f}",
                 f"{mean_ssim:.6f}",
+                f"{mean_lpips:.6f}",
+                f"{inference_ms:.6f}",
+                f"{inference_fps:.6f}",
+                method_trainable_params,
+                total_params,
             ]
         )
 

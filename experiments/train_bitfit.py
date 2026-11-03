@@ -176,7 +176,12 @@ def main() -> None:
         "--data_root",
         type=Path,
         required=True,
-        help="Path to the custom training dataset.",
+        help="Frame dataset root or video dataset root.",
+    )
+    parser.add_argument(
+        "--dataset_type",
+        choices=["custom", "video"],
+        default="custom",
     )
     parser.add_argument(
         "--base_ckpt",
@@ -245,7 +250,7 @@ def main() -> None:
         data_root=str(args.data_root),
         base_ckpt=str(args.base_ckpt),
         save_dir=str(args.save_dir),
-        dataset_type="custom",
+        dataset_type=args.dataset_type,
         split="train",
         epochs=args.epochs,
         batch_size=args.batch_size,

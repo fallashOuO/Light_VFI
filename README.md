@@ -20,7 +20,8 @@ i
 - Full Fine-tuning
 - BitFit 微調
 - LoRA 微調
-- PSNR 與 SSIM 評估
+- PSNR、SSIM、LPIPS、推論延遲與 FPS 評估
+- 直接從 MP4 串流訓練，不必先輸出大量影格檔案
 - 影片抽幀
 - GPU/CUDA 環境測試
 
@@ -39,7 +40,8 @@ Light_VFI/
 │  ├─ __init__.py
 │  ├─ data/
 │  │  ├─ __init__.py
-│  │  └─ dataset.py
+│  │  ├─ dataset.py
+│  │  └─ video_dataset.py
 │  ├─ models/
 │  │  ├─ __init__.py
 │  │  └─ light_vfi.py
@@ -102,6 +104,43 @@ GPU environment test completed successfully.
 ```
 
 ## 準備資料集
+
+### 建議：直接使用影片
+
+影片模式不會將影格寫入硬碟。訓練時會從 MP4 依序解碼、建立樣本，
+並用有限大小的 buffer 打散訓練順序。
+
+```text
+videos/domain_A/
+├─ train/
+│  ├─ video_001.mp4
+│  └─ video_002.mp4
+├─ val/
+│  └─ video_003.mp4
+└─ test/
+   └─ video_004.mp4
+```
+
+`train`、`val`、`test` 必須使用不同的原始影片，避免相鄰內容造成資料洩漏。
+建議影片統一為 H.264、1280×720、固定 30 FPS。
+
+影片模式訓練：
+
+```powershell
+python -m experiments.train_base `
+  --data_root ".\videos\domain_A" `
+  --dataset_type video `
+  --save_dir ".\checkpoints\base\domain_A" `
+  --epochs 5 `
+  --batch_size 8 `
+  --lr 1e-4 `
+  --resize 256 `
+  --device cuda `
+  --num_workers 4 `
+  --seed 42
+```
+
+### 既有方式：使用影格資料夾
 
 每一部影片必須放在獨立資料夾中，而且每個資料夾至少需要五張連續影格。
 
@@ -190,8 +229,9 @@ python .\tools\extract_frames.py `
 基礎模型使用 `train_base.py` 從頭訓練，不需要提供 `--base_ckpt`：
 
 ```powershell
-python -m experiments.train_fullft `
+python -m experiments.train_base `
   --data_root ".\data\train" `
+  --dataset_type custom `
   --save_dir ".\checkpoints\base" `
   --epochs 50 `
   --batch_size 8 `
@@ -289,7 +329,8 @@ LoRA checkpoint 只保存 LoRA 參數。評估時必須同時提供：
 
 ```powershell
 python -m experiments.evaluate `
-  --data_root ".\data\test" `
+  --data_root ".\videos\domain_A\test" `
+  --dataset_type video `
   --base_ckpt ".\checkpoints\base\best.pth" `
   --method base `
   --batch_size 8 `
@@ -342,7 +383,7 @@ python -m experiments.evaluate `
 評估結果預設會追加到：
 
 ```text
-results/metrics/metrics.csv
+results/metrics/metrics_v2.csv
 ```
 
 包含：
@@ -353,6 +394,11 @@ results/metrics/metrics.csv
 - checkpoint 大小
 - PSNR
 - SSIM
+- LPIPS
+- 模型 forward 延遲（ms/frame）
+- 模型 forward FPS
+- 方法實際訓練參數量
+- 載入後模型總參數量
 
 ## 訓練紀錄
 
